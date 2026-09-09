@@ -20,6 +20,9 @@ cables. No router is present, and no default gateway is configured on either hos
               Fa0/1        Fa0/2
 ```
 
+<img width="523" height="208" alt="01-topology" src="https://github.com/user-attachments/assets/dc284383-0dac-42b2-832c-2e0b5799ad42" />
+
+
 ## Addressing Table
 
 | Device | Interface | IP Address   | Subnet Mask   | Default Gateway |
@@ -30,13 +33,18 @@ cables. No router is present, and no default gateway is configured on either hos
 The default gateway was intentionally left empty to prove that hosts in the same
 network do not need a router to communicate.
 
+<img width="521" height="397" alt="02-pc0-ip-config" src="https://github.com/user-attachments/assets/dd6312db-b2ff-4e48-8f50-b6b284d6ff74" />
+
+<img width="542" height="412" alt="03-pc1-ip-config" src="https://github.com/user-attachments/assets/946ecfa3-0702-439d-8ad9-12830ce157f4" />
+
+
 ## Hardware Notes
 
-| Device   | Model          | Details                                        |
-|----------|----------------|------------------------------------------------|
-| Switch0  | WS-C2960-24TT-L| 24 FastEthernet ports, 2 Gigabit Ethernet ports |
-| PC0      | PC-PT          | MAC address: 00E0.F943.25E9                    |
-| PC1      | PC-PT          | MAC address: 0001.C754.CBCC                    |
+| Device   | Model           | Details                                         |
+|----------|-----------------|-------------------------------------------------|
+| Switch0  | WS-C2960-24TT-L | 24 FastEthernet ports, 2 Gigabit Ethernet ports |
+| PC0      | PC-PT           | MAC address: 00E0.F9C7.DE49                     |
+| PC1      | PC-PT           | MAC address: 00D0.BA55.7B05                     |
 
 ## Steps
 
@@ -70,22 +78,37 @@ C:\>arp -a
 No ARP Entries Found
 ```
 
+<img width="547" height="406" alt="04-arp-empty" src="https://github.com/user-attachments/assets/b56dcf5f-dec7-4443-b6fc-3aafc4908dc5" />
+
+
 The ARP table was empty even though both PCs were configured and cabled correctly.
 This confirms that ARP only runs when a host actually needs to send data.
 Configuring an IP address does not generate traffic by itself.
 
-### Ping test
+### Ping test and ARP resolution
 
 ```
 C:\>ping 192.168.1.20
 
-Reply from 192.168.1.20: bytes=32 time<1ms TTL=128
-Reply from 192.168.1.20: bytes=32 time<1ms TTL=128
+Reply from 192.168.1.20: bytes=32 time=1ms TTL=128
+Reply from 192.168.1.20: bytes=32 time=1ms TTL=128
 Reply from 192.168.1.20: bytes=32 time<1ms TTL=128
 Reply from 192.168.1.20: bytes=32 time<1ms TTL=128
 
 Packets: Sent = 4, Received = 4, Lost = 0 (0% loss)
+
+C:\>arp -a
+  Internet Address      Physical Address      Type
+  192.168.1.20          00d0.ba55.7b05        dynamic
 ```
+
+<img width="636" height="463" alt="05-ping-success-arp-populated" src="https://github.com/user-attachments/assets/64f6c369-480d-44b9-bbdc-5cb3c952dc62" />
+
+
+This single capture shows the full ARP cycle: empty table, successful communication,
+populated table. PC0 sent an ARP Request as a broadcast, PC1 replied with its MAC
+address, and PC0 cached the result. The `dynamic` type means the entry was learned,
+not manually configured, and it will expire after a timeout.
 
 All four packets succeeded. I expected the first packet to time out while ARP
 resolved the destination MAC address, but Packet Tracer completed the ARP exchange
@@ -93,18 +116,6 @@ fast enough that no timeout occurred.
 
 `TTL=128` is the default starting value on Windows hosts. Because it was not
 decremented, this confirms the packet did not cross a router.
-
-### ARP table after communication
-
-```
-C:\>arp -a
-  Internet Address      Physical Address      Type
-  192.168.1.20          0001.c754.cbcc        dynamic
-```
-
-The entry appeared automatically. PC0 sent an ARP Request as a broadcast, PC1
-replied with its MAC address, and PC0 cached the result. The `dynamic` type means
-the entry was learned, not manually configured, and it will expire after a timeout.
 
 ### Switch MAC address table
 
@@ -119,9 +130,12 @@ Switch#show mac address-table
 
 Vlan    Mac Address       Type        Ports
 ----    -----------       --------    -----
-   1    0001.c754.cbcc    DYNAMIC     Fa0/2
-   1    00e0.f943.25e9    DYNAMIC     Fa0/1
+   1    00d0.ba55.7b05    DYNAMIC     Fa0/2
+   1    00e0.f9c7.de49    DYNAMIC     Fa0/1
 ```
+
+<img width="615" height="452" alt="06-switch-mac-address-table" src="https://github.com/user-attachments/assets/b6499754-47e4-43f2-ae70-eca75fe8114e" />
+
 
 Both MAC addresses match exactly what `ipconfig /all` reported on each PC, mapped
 to the correct ports. The `DYNAMIC` type confirms the switch learned them on its
@@ -136,21 +150,36 @@ subnet mask and leaving the cabling untouched.
 
 ### The result
 
-```
-C:\>ping 192.168.2.20
-
-Request timed out.
-Request timed out.
-Request timed out.
-Request timed out.
-
-Packets: Sent = 4, Received = 0, Lost = 4 (100% loss)
-```
+Two different pings were tested, and both failed with identical output:
 
 ```
+C:\>ping 192.168.1.20          <- IP that no longer exists on the network
+Request timed out. (x4)        100% loss
+
+C:\>ping 192.168.2.20          <- IP on a different network
+Request timed out. (x4)        100% loss
+
 C:\>arp -a
-No ARP Entries Found
+  Internet Address      Physical Address      Type
+  192.168.1.20          00d0.ba55.7b05        dynamic
 ```
+
+<img width="857" height="625" alt="07-ping-failures-comparison" src="https://github.com/user-attachments/assets/4e2b8933-9675-44a5-b56d-e8e598b692cb" />
+
+
+### Same symptom, different causes
+
+This was the most valuable part of the lab. Both pings produced the exact same
+output on screen, but the underlying failures were completely different:
+
+| Ping target    | Why it failed                                      | Did ARP run? |
+|----------------|----------------------------------------------------|--------------|
+| 192.168.1.20   | Local network, but no host holds that IP anymore   | Yes, no reply |
+| 192.168.2.20   | Different network, and no default gateway is set   | No, never ran |
+
+The ARP table proves it. After pinging `192.168.2.20`, that address does **not**
+appear in the cache — only the stale entry for `192.168.1.20` from the earlier
+successful ping. PC0 never asked for the MAC address of `192.168.2.20`.
 
 ### Root cause
 
@@ -169,10 +198,7 @@ The networks do not match, so PC0 concluded the destination was remote and neede
 to be forwarded to a default gateway. Since no gateway was configured, PC0 had
 nowhere to send the packet and dropped it internally.
 
-### Why the ARP table stayed empty
-
-This was the most important detail of the lab. The ARP table was empty **not because
-ARP failed, but because ARP never ran at all**.
+### Why ARP never ran
 
 The host follows this order:
 
@@ -184,27 +210,19 @@ PC0 failed at step 1, so it never reached step 2. No ARP Request was ever sent.
 
 This distinction matters for troubleshooting:
 
-| Empty ARP table because... | Problem type | Where to look              |
-|----------------------------|--------------|----------------------------|
-| ARP was sent, no reply     | Physical     | Cable, port, device powered|
-| ARP never ran              | Logical      | IP, subnet mask, gateway   |
+| Empty ARP entry because... | Problem type | Where to look               |
+|----------------------------|--------------|-----------------------------|
+| ARP was sent, no reply     | Physical     | Cable, port, device powered |
+| ARP never ran              | Logical      | IP, subnet mask, gateway    |
 
-### Switch table after the change
+### Switch behaviour during the change
 
-```
-Vlan    Mac Address       Type        Ports
-----    -----------       --------    -----
-   1    0001.c754.cbcc    DYNAMIC     Fa0/2
-```
+The switch MAC address table was unaffected by the IP change. **The switch operates
+at Layer 2 and has no awareness of IP addresses at all**, so a Layer 3
+reconfiguration cannot alter what it has learned.
 
-PC1's MAC address was still present, but PC0's had disappeared.
-
-I initially predicted the opposite — I thought changing the IP would remove PC1's
-entry. That was wrong. **The switch operates at Layer 2 and has no awareness of IP
-addresses at all.** Changing an IP address cannot affect the MAC address table.
-
-PC0's entry disappeared because of the aging timer: its pings never left the PC, so
-it generated no traffic reaching the switch, and the entry expired from inactivity.
+Entries only disappear from the table when the aging timer expires after a period
+of inactivity, when the switch reboots, or when the table is cleared manually.
 
 ### The fix
 
@@ -218,7 +236,9 @@ To make the two networks communicate, two things are required:
 
 - ARP only runs when a host actually needs to send data. Configuring an IP address
   does not trigger it.
-- An empty ARP table means two very different things depending on whether the
+- Two completely different failures can produce identical output on screen. The ARP
+  table is what tells them apart.
+- An empty ARP entry means very different things depending on whether the
   destination is local or remote. That distinction narrows the problem down fast.
 - A switch never looks at IP addresses. Changing an IP has zero effect on the MAC
   address table.
